@@ -115,6 +115,7 @@ class VmDebootstrap(cliapp.Application):
         self.settings.boolean(['sparse'],
                 'Dont fill the image with zeros to keep a sparse disk image',
                 default=False)
+        self.settings.boolean(['customize-in-chroot'], 'Run customize-script within a chroot? Default: True')
 
     def process_args(self, args):
         if not self.settings['image'] and not self.settings['tarball']:
@@ -599,6 +600,29 @@ append initrd=%(initrd)s root=UUID=%(uuid)s ro %(kserial)s
                 self.message("Unable to find %s" % script)
                 return
             script = example
+
+        chroot = self.settings['customize-in-chroot']
+
+        destscript = "{0}usr{0}sbin{0}{1}".format(
+            os.path.sep, script.rpartition(os.path.sep)[2])
+        shutil.copy(script, rootdir + destscript)
+
+        command = []
+        if chroot:
+            command += ["chroot"]
+        command += [rootdir, destscript]
+
+        if destscript:
+            self.message('Running customize script %s, %sin chroot.' %
+                (destscript, '' if chroot else 'not '))
+            try:
+                with open('/dev/tty', 'w') as tty:
+                    cliapp.runcmd(command, stdout=tty, stderr=tty)
+            except IOError as e:
+                # tty unavailable, try running in headless mode.
+                if subprocess.call(command):
+                    raise cliapp.AppException("customize script failed!")
+
         self.message('Running customize script %s' % script)
         with open('/dev/tty', 'w') as tty:
             cliapp.runcmd([script, rootdir], stdout=tty, stderr=tty)
